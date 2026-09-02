@@ -1,0 +1,57 @@
+{
+  "plot": {
+    "width": 14.0,
+    "height": 10.0,
+    "setback": 0.6
+  },
+  "rooms": [
+    {
+      "name": "Bedroom 2",
+      "room_type": "bedroom",
+      "x": 7.1,
+      "y": 0.6,
+      "w": 3.3,
+      "h": 3.8
+    },
+    {
+      "name": "Living Room",
+      "room_type": "living",
+      "x": 5.6,
+      "y": 4.4,
+      "w": 5.0,
+      "h": 4.5
+    },
+    {
+      "name": "Bedroom 1",
+      "room_type": "bedroom",
+      "x": 1.1,
+      "y": 0.6,
+      "w": 6.0,
+      "h": 3.0
+    },
+    {
+      "name": "Kitchen",
+      "room_type": "kitchen",
+      "x": 1.6,
+      "y": 4.9,
+      "w": 4.0,
+      "h": 3.0
+    },
+    {
+      "name": "Bathroom",
+      "room_type": "bathroom",
+      "x": 10.6,
+      "y": 1.1,
+      "w": 2.3,
+      "h": 2.8
+    },
+    {
+      "name": "Entry",
+      "room_type": "circulation",
+      "x": 10.600000000000001,
+      "y": 4.6000000000000005,
+      "w": 2.3,
+      "h": 3.3
+    }
+  ]
+}
