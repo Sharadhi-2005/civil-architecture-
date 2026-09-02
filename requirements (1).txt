@@ -1,0 +1,5 @@
+matplotlib>=3.8.0   # floor plan visualization (src/visualize.py)
+
+# CAD export (src/cad_export.py) writes raw DXF by hand - no ezdxf needed.
+# If you'd rather use the ezdxf library instead, install it separately:
+# pip install ezdxf
