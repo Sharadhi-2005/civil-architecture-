@@ -1,0 +1,4 @@
+matplotlib>=3.8.0   # floor plan visualization (src/visualize.py)
+
+# Uncomment as later stages are implemented:
+# ezdxf>=1.1.0        # CAD/DXF export
