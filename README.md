@@ -1,140 +1,122 @@
 # AI Floor Plan Designer
 
 An AI-based civil architecture design system that generates optimized
-building floor plans (and eventually interior layouts + CAD export) from
-high-level user requirements like plot size, room count, and design
-preferences.
+building floor plans from high-level requirements (plot size, room
+list, area/adjacency constraints), then carries that layout through
+to a 3D mesh, a CAD file, and a compliance/materials PDF report.
 
-All 8 algorithms from the design doc are implemented:
+## Algorithms and where they live
 
 | # | Algorithm | File |
 |---|---|---|
-| 1 | CSP solver (structural validity) | `src/csp_solver.py` |
-| 2 | Genetic Algorithm (multi-objective optimization) | `src/genetic_algorithm.py` |
-| 3 | Graph-based room adjacency modeling | `src/graph_model.py` |
-| 4 | Rectangular space partitioning (BSP) | `src/bsp_partition.py` |
-| 5 | Simulated Annealing (local refinement) | `src/simulated_annealing.py` |
-| 6 | Rule-based interior placement | `src/interior_rules.py` |
-| 7 | Collision/overlap detection (AABB + SAT) | `src/geometry_utils.py` |
-| 8 | CAD export (DXF + 3D wall extrusion) | `src/cad_export.py` |
+| 1 | CSP solver (backtracking + MRV + forward checking) | `src/csp_generator.py` |
+| 2 | Simulated Annealing (local layout refinement) | `src/csp_generator.py` |
+| 3 | Graph-based room adjacency modeling (bubble diagram) | `src/graph_model.py` |
+| 4 | 3D mesh generation (wall/floor extrusion to OBJ) | `src/mesh_generator.py` |
+| 5 | CAD export (hand-written DXF, 2D + 3D wall extrusion) | `src/cad_export.py` |
+| 6 | Compliance checks + material estimation + PDF report | `src/report_generator.py` |
 
-## Two independent pipelines in this repo
-
-There are two ways to generate a floor plan here, and they're
-deliberately separate:
-
-- **CSP pipeline** (`src/main.py`) — the original backtracking solver.
-  Guarantees validity by construction; doesn't optimize *among* valid
-  layouts.
-- **GA/BSP pipeline** (`src/demo_full_pipeline.py`) — graph model -> GA
-  (searches room orderings) -> BSP (turns an ordering into geometry) ->
-  simulated annealing (locally refines wall positions) -> rule-based
-  furniture placement -> collision/clearance validation -> DXF export.
-  This one actively optimizes for space utilization, ventilation, and
-  adjacency satisfaction, and carries the layout all the way to CAD
-  output with furniture.
+`src/models.py` holds the shared data classes (`Rect`, `Plot`, `Room`)
+used across the project — it has no logic of its own to run.
 
 ## How each stage works
 
-**CSP solver** — the plot is discretized into a grid; each room is a CSP
-variable whose domain is every candidate rectangle satisfying its own
-area/shape rules. Backtracking search assigns one rectangle per room
-using MRV (branch on the room with fewest options left) and forward
-checking (prune other rooms' domains the instant a room is placed,
-backtrack immediately if any domain empties).
+**CSP solver** (`csp_generator.py`, `CSPFloorPlanGenerator`) — the plot
+is discretized on a grid; each room is a CSP variable whose domain is
+every candidate rectangle satisfying its own area/dimension rules.
+Backtracking search assigns one rectangle per room using MRV (branch on
+the room with fewest options left) and forward checking (prune other
+rooms' domains the instant a room is placed, backtrack immediately if
+any domain empties).
 
-**Graph model** — rooms are nodes, required adjacencies (from
-`Room.adjacent_to`) are edges — the "bubble diagram" architects sketch
-before any geometry exists. Provides degree/BFS ordering and an
-`adjacency_score()` used by the optimizers below.
+**Simulated Annealing** (`csp_generator.py`, `SimulatedAnnealingRefiner`)
+— once the CSP finds a valid layout, SA nudges room positions and sizes
+to reduce a soft-cost function (aspect ratio, unmet adjacency
+preferences, wasted circulation space), using the Metropolis criterion
+so it can still escape small local optima, with a cooling schedule that
+makes it greedier over time.
 
-**BSP partitioning** — recursively slices the plot in two along its
-longer side, splitting an *ordered* room list into two area-proportional
-groups at each cut, recursing until each group is one room. Split
-fractions are stored per node so they can be perturbed later without
-changing the tree structure.
+**Graph model** (`graph_model.py`) — rooms are nodes, required
+adjacencies are edges — the "bubble diagram" architects sketch before
+any geometry exists. Provides degree/BFS ordering and an
+`adjacency_score()` used to evaluate how well a layout satisfies
+required room connections.
 
-**Genetic Algorithm** — searches over room *orderings* (the permutation
-fed into BSP) to maximize a weighted combination of space utilization,
-ventilation exposure, adjacency satisfaction, and shape quality. Uses
-tournament selection, order crossover (valid for permutations), swap
-mutation, and elitism.
+**3D mesh generation** (`mesh_generator.py`) — turns the 2D room
+layout into a 3D wall/floor mesh and writes it out as an OBJ file,
+importable directly into Blender, Unity, Three.js, or Unreal.
 
-**Simulated Annealing** — after the GA fixes a room order, SA nudges the
-BSP tree's *split fractions* (continuous) to locally improve fit, using
-the Metropolis criterion so it can still escape small local optima
-instead of getting stuck, with a cooling schedule that makes it greedier
-over time.
+**CAD export** (`cad_export.py`) — writes a raw ASCII DXF (R12 entity
+set: POLYLINE, TEXT, 3DFACE) by hand, no external library required.
+Each room outline can optionally be extruded into vertical 3D wall
+faces at a given wall height.
 
-**Interior placement** — a rule-based expert system: explicit IF-THEN
-heuristics per room type (bed against a wall, table centered, counter
-along the longest wall), validated against `geometry_utils` so nothing
-overlaps.
-
-**Collision detection** — AABB overlap for the common axis-aligned case,
-plus a full Separating Axis Theorem implementation for rotated furniture,
-plus minimum-clearance (walkway gap) checks.
-
-**CAD export** — writes a raw ASCII DXF (R12 entity set: POLYLINE, TEXT,
-3DFACE) by hand, no external library required. Each room outline can
-optionally be extruded into vertical 3D wall faces at a given wall
-height.
+**Compliance + report** (`report_generator.py`) — runs rule-based
+compliance checks (e.g. required adjacencies), estimates material
+quantities from room areas, and compiles everything into a formatted
+PDF using `reportlab`.
 
 ## Project structure
 
 ```
 src/
-  models.py             # Rect, Plot, Room, FloorPlanRequest
-  csp_solver.py          # 1. CSP backtracking solver
-  genetic_algorithm.py   # 2. GA optimizer
+  models.py             # Rect, Plot, Room data classes (no logic to run)
+  csp_generator.py       # 1-2. CSP solver + simulated annealing
   graph_model.py          # 3. adjacency graph / bubble diagram
-  bsp_partition.py        # 4. BSP space partitioning
-  simulated_annealing.py  # 5. SA refinement
-  interior_rules.py       # 6. rule-based furniture placement
-  geometry_utils.py       # 7. AABB + SAT collision detection
-  cad_export.py            # 8. DXF export
-  main.py                 # demo: CSP pipeline
-  demo_full_pipeline.py    # demo: full GA/BSP pipeline, all 8 stages
-  visualize.py             # matplotlib PNG rendering
+  mesh_generator.py        # 4. 3D mesh (OBJ) export
+  cad_export.py             # 5. CAD (DXF) export
+  report_generator.py       # 6. compliance checks + PDF report
+  main.py                    # demo: CSP + SA pipeline, ASCII output
+  visualize.py                # demo: PNG render of the CSP pipeline's plan
 tests/
   test_csp_solver.py
   test_optimizers.py
 ```
 
-## Running it
+## Setup
 
 ```bash
-pip install -r requirements.txt   # matplotlib only
-python -m src.main                 # CSP pipeline
-python -m src.demo_full_pipeline   # full GA/BSP pipeline (all 8 algorithms)
-python -m src.visualize            # save a PNG of the CSP pipeline's plan
+pip install -r requirements.txt   # matplotlib
+pip install reportlab              # needed by report_generator.py
 ```
 
-Example output:
+## Running it
+
+Run the CSP generator first — several other scripts read the
+`layout.json` it produces.
+
+```bash
+python -c "from src.csp_generator import demo; demo()"    # writes layout.json
+python -c "from src.mesh_generator import demo; demo()"   # writes floor_plan.obj
+python -c "from src.report_generator import demo; demo()" # writes report.pdf
+python -m src.main                                          # ASCII floor plan (self-contained demo)
+python -m src.visualize                                     # writes floorplan.png
+python -m src.cad_export                                    # writes floorplan.dxf (reads layout.json)
+```
+
+Example output (`python -m src.main`):
 
 ```
-Solved in 8 search steps.
-
 Plot: 14 x 10
 
-  bedroom2   -> x= 0 y= 0 w= 3 h= 4 (area=12)
-  bedroom1   -> x= 0 y= 4 w= 3 h= 4 (area=12)
-  entrance   -> x= 1 y= 8 w= 2 h= 2 (area=4)
-  living     -> x= 3 y= 4 w= 3 h= 6 (area=18)
-  dining     -> x= 3 y= 0 w= 3 h= 4 (area=12)
-  kitchen    -> x= 6 y= 0 w= 2 h= 4 (area=8)
-  bathroom   -> x= 6 y= 4 w= 2 h= 2 (area=4)
+  bedroom2   -> x= 7.60 y= 5.60 w= 4.00 h= 3.00 (area=12.00)
+  dining     -> x= 0.60 y= 4.60 w= 3.00 h= 4.00 (area=12.00)
+  bedroom1   -> x= 5.60 y= 0.60 w= 3.00 h= 4.00 (area=12.00)
+  living     -> x= 3.60 y= 4.60 w= 4.00 h= 4.00 (area=16.00)
+  kitchen    -> x= 0.60 y= 2.60 w= 4.50 h= 2.00 (area=9.00)
+  bathroom   -> x= 9.60 y= 1.60 w= 2.00 h= 3.00 (area=6.00)
+  entrance   -> x= 0.60 y= 0.60 w= 2.00 h= 2.00 (area=4.00)
 
-BBBDDDKK......
-BBBDDDKK......
-BBBDDDKK......
-BBBDDDKK......
-BBBLLLBB......
-BBBLLLBB......
-BBBLLL........
-BBBLLL........
-.EELLL........
-.EELLL........
+EE...BBB......
+EE...BBB.BB...
+KKKKKBBB.BB...
+KKKKKBBB.BB...
+DDDLLLL.......
+DDDLLLLBBBB...
+DDDLLLLBBBB...
+DDDLLLLBBBB...
+..............
+..............
 ```
 
 ### Running tests
@@ -146,17 +128,20 @@ python -m unittest discover -s tests -v
 ## Roadmap
 
 - [x] CSP solver — structurally valid floor plan generation
-- [x] Genetic Algorithm + Simulated Annealing — optimize among valid
-      layouts for space utilization, ventilation, adjacency
-- [x] Rule-based interior element placement (furniture per room)
-- [x] Collision/overlap checks (AABB + SAT) for furniture placement
+- [x] Simulated Annealing — optimize among valid layouts for space
+      utilization, ventilation, adjacency
+- [x] 3D mesh export (OBJ, wall extrusion)
 - [x] CAD export (hand-written DXF, 2D + 3D wall extrusion)
-- [ ] Merge the CSP and GA/BSP pipelines into one configurable entry point
+- [x] Compliance checks + material estimation + PDF report
+- [ ] Genetic Algorithm / BSP-based optimization pipeline
+- [ ] Rule-based interior/furniture placement
+- [ ] Collision/overlap detection (AABB + SAT) for furniture
 - [ ] Door/window placement (currently assumed, not modeled)
 
 ## Tech stack
 
-- Python 3, stdlib only for every algorithm except visualization
-- `matplotlib` for PNG rendering (only external dependency)
-- DXF export is hand-written (no `ezdxf` dependency) but compatible with
-  it if you'd rather swap in that library
+- Python 3, stdlib only for the CSP/SA/graph/mesh/DXF algorithms
+- `matplotlib` for PNG rendering (`src/visualize.py`)
+- `reportlab` for PDF report generation (`src/report_generator.py`)
+- DXF export is hand-written (no `ezdxf` dependency) but compatible
+  with it if you'd rather swap in that library
